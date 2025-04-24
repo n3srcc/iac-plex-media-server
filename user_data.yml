@@ -1,0 +1,73 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+packages:
+  - nginx
+  - certbot
+  - python3-certbot-nginx
+  - curl
+  - gnupg
+
+write_files:
+  - path: /root/.config/rclone/rclone.conf
+    permissions: '0600'
+    content: |
+      [digital_ocean_spaces]
+      provider = DigitalOcean
+      type = s3
+      env_auth = false
+      access_key_id = ${spaces_access_key_id}
+      secret_access_key = ${spaces_secret_key}
+      region = nyc3
+      endpoint = https://nyc3.digitaloceanspaces.com
+      location_constraint = nyc3
+      acl = private
+      
+  - path: /etc/nginx/sites-available/plex
+    content: |
+      server {
+          listen 80;
+          server_name ${domain_name};
+
+          location / {
+              proxy_pass http://127.0.0.1:32400;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+          }
+
+          # WebSocket proxy para Plex
+          location /:/websockets/notifications {
+              proxy_http_version 1.1;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection "upgrade";
+              proxy_pass http://localhost:32400;
+          }
+      }
+    permissions: '0644'
+
+runcmd:
+  #- dpkg --configure -a
+  - mkdir -p /mnt/plex-media
+  - apt install rclone -y
+  - mkdir -p /root/.config/rclone
+  - chown -R root:root /root/.config/rclone
+  - chmod 600 /root/.config/rclone/rclone.conf
+  - rclone mount digital_ocean_spaces:${spaces_bucket_name} /mnt/plex-media --daemon
+  - rclone sync do_spaces:${spaces_bucket_name} /mnt/plex-media --progress
+  - echo "deb https://downloads.plex.tv/repo/deb public main" > /etc/apt/sources.list.d/plexmediaserver.list
+  - curl https://downloads.plex.tv/plex-keys/PlexSign.key | apt-key add -
+  - apt update
+  - apt install -y plexmediaserver
+  - ln -s /etc/nginx/sites-available/plex /etc/nginx/sites-enabled/
+  - nginx -t && systemctl restart nginx
+  - certbot --nginx -d ${domain_name} --non-interactive --agree-tos -m ${email}
+  - systemctl restart nginx
+
+power_state:
+  timeout: 120
+  delay: "+7"
+  message: Rebooting in 7 minutes.
+  mode: reboot

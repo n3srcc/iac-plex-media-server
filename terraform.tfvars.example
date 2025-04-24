@@ -1,0 +1,7 @@
+do_token          = ""
+ssh_key_id        = ""
+spaces_access_key_id = ""
+spaces_secret_key = ""
+domain_name        = ""
+spaces_bucket_name = ""
+certbot_email = ""
